@@ -35,10 +35,7 @@ public class CheckoutServiceTests
         Items = items
     };
 
-    private static OrderItem CreateItem(
-        decimal price = 100m,
-        int quantity = 1,
-        string name = "Lab") => new()
+    private static OrderItem CreateItem(decimal price = 100m,int quantity = 1,string name = "Lab") => new()
         {
             ProductId = Guid.NewGuid(),
             ProductName = name,
@@ -69,6 +66,7 @@ public class CheckoutServiceTests
 
         await act.Should().ThrowAsync<InvalidQuantityException>()
             .WithMessage("*Lab*");
+       
     }
 
     [Fact]
@@ -134,5 +132,68 @@ public class CheckoutServiceTests
         receipt.Subtotal.Should().Be(1500m);
         receipt.Discount.Should().Be(100m);
         receipt.Total.Should().Be(1400m);
+    }
+
+    // ---------- Task 2: Mocks ----------
+
+    [Fact]
+    public async Task CheckoutAsync_WhenAllItemsInStock_ShouldSaveOnceAndSendConfirmationOnce()
+    {
+        var order = CreateOrder(
+            CreateItem(price: 200m, quantity: 1, name: "Product A"),
+            CreateItem(price: 300m, quantity: 2, name: "Product B"));
+
+        var receipt = await _sut.CheckoutAsync(order);
+
+        receipt.OrderId.Should().Be(order.Id);
+        _repository.Verify(
+            r => r.SaveAsync(order, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _notifications.Verify(
+            n => n.SendOrderConfirmationAsync(receipt, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+    [Fact]
+    public async Task CheckoutAsync_WhenOneItemIsOutOfStock_ShouldThrowAndNeverSaveOrSendConfirmation()
+    {
+        var inStock = CreateItem(name: "Mouse");
+        var outOfStock = CreateItem(name: "Lab");
+        var order = CreateOrder(inStock, outOfStock);
+        _inventory
+            .Setup(x => x.IsAvailableAsync(
+                outOfStock.ProductId,
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        Func<Task> act = () => _sut.CheckoutAsync(order);
+
+        await act.Should().ThrowAsync<InsufficientInventoryException>()
+            .WithMessage("*Lab*");
+        _repository.Verify(
+            r => r.SaveAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _notifications.Verify(
+            n => n.SendOrderConfirmationAsync(It.IsAny<CheckoutReceipt>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CheckoutAsync_WhenValidationFails_ShouldNeverCheckInventorySaveOrSendConfirmation()
+    {
+        var order = CreateOrder(CreateItem(quantity: 0));
+
+        Func<Task> act = () => _sut.CheckoutAsync(order);
+
+        await act.Should().ThrowAsync<InvalidQuantityException>();
+        _inventory.Verify(
+            i => i.IsAvailableAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _repository.Verify(
+            r => r.SaveAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _notifications.Verify(
+            n => n.SendOrderConfirmationAsync(It.IsAny<CheckoutReceipt>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }
