@@ -1,7 +1,7 @@
 # Testing Notes
 
 Name: < samira khaled anwar shaltout >
-Group / ID: < group 3 / id>
+Group / ID: < group 3>
 
 ## 1. How many tests?
 - Total: 20
